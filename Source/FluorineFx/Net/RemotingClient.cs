@@ -325,87 +325,91 @@ namespace FluorineFx.Net
 
         private void BeginResponseFlexCall(IAsyncResult ar)
         {
+            
             try
             {
                 AmfRequestData amfRequestData = ar.AsyncState as AmfRequestData;
                 if (amfRequestData != null)
                 {
-                    HttpWebResponse response = (HttpWebResponse)amfRequestData.Request.EndGetResponse(ar);
-                    if (response != null)
+                    using (HttpWebResponse response = (HttpWebResponse)amfRequestData.Request.EndGetResponse(ar))
                     {
-                        //Get response and deserialize
-                        Stream responseStream = response.GetResponseStream();
-                        if (responseStream != null)
+                        if (response != null)
                         {
-                            AMFDeserializer amfDeserializer = new AMFDeserializer(responseStream);
-                            AMFMessage responseMessage = amfDeserializer.ReadAMFMessage();
-                            AMFBody responseBody = responseMessage.GetBodyAt(0);
-                            for (int i = 0; i < responseMessage.HeaderCount; i++)
+                            //Get response and deserialize
+                            Stream responseStream = response.GetResponseStream();
+                            if (responseStream != null)
                             {
-                                AMFHeader header = responseMessage.GetHeaderAt(i);
-                                if (header.Name == AMFHeader.RequestPersistentHeader)
-                                    _netConnection.AddHeader(header.Name, header.MustUnderstand, header.Content);
-                            }
-                            object message = responseBody.Content;
-                            if (message is ErrorMessage)
-                            {
-                                /*
-                                ASObject status = new ASObject();
-                                status["level"] = "error";
-                                status["code"] = "NetConnection.Call.Failed";
-                                status["description"] = (result as ErrorMessage).faultString;
-                                status["details"] = result;
-                                _netConnection.RaiseNetStatus(status);
-                                */
-                                if (amfRequestData.Call != null)
+                                AMFDeserializer amfDeserializer = new AMFDeserializer(responseStream);
+                                AMFMessage responseMessage = amfDeserializer.ReadAMFMessage();
+                                AMFBody responseBody = responseMessage.GetBodyAt(0);
+                                for (int i = 0; i < responseMessage.HeaderCount; i++)
                                 {
-                                    PendingCall call = amfRequestData.Call;
-                                    call.Result = message;
-                                    call.Status = Messaging.Rtmp.Service.Call.STATUS_INVOCATION_EXCEPTION;
-                                    amfRequestData.Callback.ResultReceived(call);
+                                    AMFHeader header = responseMessage.GetHeaderAt(i);
+                                    if (header.Name == AMFHeader.RequestPersistentHeader)
+                                        _netConnection.AddHeader(header.Name, header.MustUnderstand, header.Content);
                                 }
-                                if (amfRequestData.Responder != null)
+                                object message = responseBody.Content;
+                                if (message is ErrorMessage)
                                 {
-                                    StatusFunction statusFunction = amfRequestData.Responder.GetType().GetProperty("Status").GetValue(amfRequestData.Responder, null) as StatusFunction;
-                                    if (statusFunction != null)
-                                        statusFunction(new Fault(message as ErrorMessage));
-                                }
-                            }
-                            else if (message is AcknowledgeMessage)
-                            {
-                                AcknowledgeMessage ack = message as AcknowledgeMessage;
-                                if (_netConnection.ClientId == null && ack.HeaderExists(MessageBase.FlexClientIdHeader))
-                                    _netConnection.SetClientId(ack.GetHeader(MessageBase.FlexClientIdHeader) as string);
-                                if (amfRequestData.Call != null)
-                                {
-                                    PendingCall call = amfRequestData.Call;
-                                    call.Result = ack.body;
-                                    call.Status = Messaging.Rtmp.Service.Call.STATUS_SUCCESS_RESULT;
-                                    amfRequestData.Callback.ResultReceived(call);
-                                }
-                                if (amfRequestData.Responder != null)
-                                {
-                                    Delegate resultFunction = amfRequestData.Responder.GetType().GetProperty("Result").GetValue(amfRequestData.Responder, null) as Delegate;
-                                    if (resultFunction != null)
+                                    /*
+                                    ASObject status = new ASObject();
+                                    status["level"] = "error";
+                                    status["code"] = "NetConnection.Call.Failed";
+                                    status["description"] = (result as ErrorMessage).faultString;
+                                    status["details"] = result;
+                                    _netConnection.RaiseNetStatus(status);
+                                    */
+                                    if (amfRequestData.Call != null)
                                     {
-                                        ParameterInfo[] arguments = resultFunction.Method.GetParameters();
-                                        object result = TypeHelper.ChangeType(ack.body, arguments[0].ParameterType);
-                                        resultFunction.DynamicInvoke(result);
+                                        PendingCall call = amfRequestData.Call;
+                                        call.Result = message;
+                                        call.Status = Messaging.Rtmp.Service.Call.STATUS_INVOCATION_EXCEPTION;
+                                        amfRequestData.Callback.ResultReceived(call);
+                                    }
+                                    if (amfRequestData.Responder != null)
+                                    {
+                                        StatusFunction statusFunction = amfRequestData.Responder.GetType().GetProperty("Status").GetValue(amfRequestData.Responder, null) as StatusFunction;
+                                        if (statusFunction != null)
+                                            statusFunction(new Fault(message as ErrorMessage));
+                                    }
+                                }
+                                else if (message is AcknowledgeMessage)
+                                {
+                                    AcknowledgeMessage ack = message as AcknowledgeMessage;
+                                    if (_netConnection.ClientId == null && ack.HeaderExists(MessageBase.FlexClientIdHeader))
+                                        _netConnection.SetClientId(ack.GetHeader(MessageBase.FlexClientIdHeader) as string);
+                                    if (amfRequestData.Call != null)
+                                    {
+                                        PendingCall call = amfRequestData.Call;
+                                        call.Result = ack.body;
+                                        call.Status = Messaging.Rtmp.Service.Call.STATUS_SUCCESS_RESULT;
+                                        amfRequestData.Callback.ResultReceived(call);
+                                    }
+                                    if (amfRequestData.Responder != null)
+                                    {
+                                        Delegate resultFunction = amfRequestData.Responder.GetType().GetProperty("Result").GetValue(amfRequestData.Responder, null) as Delegate;
+                                        if (resultFunction != null)
+                                        {
+                                            ParameterInfo[] arguments = resultFunction.Method.GetParameters();
+                                            object result = TypeHelper.ChangeType(ack.body, arguments[0].ParameterType);
+                                            resultFunction.DynamicInvoke(result);
+                                        }
                                     }
                                 }
                             }
+                            else
+                                _netConnection.RaiseNetStatus("Could not aquire ResponseStream");
                         }
                         else
-                            _netConnection.RaiseNetStatus("Could not aquire ResponseStream");
+                            _netConnection.RaiseNetStatus("Could not aquire HttpWebResponse");
                     }
-                    else
-                        _netConnection.RaiseNetStatus("Could not aquire HttpWebResponse");
                 }
             }
             catch (Exception ex)
             {
                 _netConnection.RaiseNetStatus(ex);
             }
+          
         }
 
         public void Write(IRtmpEvent message)
